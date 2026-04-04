@@ -47,5 +47,7 @@ def poll_process_output(process: subprocess.Popen, username: str) -> None:
             if not line:
                 break
             logger.debug("[yt-dlp:%s] %s", username, line.rstrip())
+    except OSError:
+        pass  # pipe closed; process likely terminated
     except Exception:
-        pass
+        logger.warning("Unexpected error reading output for %s", username, exc_info=True)
