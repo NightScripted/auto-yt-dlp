@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from downloader import poll_process_output, start_download
+from downloader import start_download
 from watcher import extract_username, is_live
 
 logging.basicConfig(
@@ -58,7 +58,6 @@ def main() -> None:
             proc = active[username]
             ret = proc.poll()
             if ret is not None:
-                poll_process_output(proc, username)
                 logger.info("Download for %s finished (exit code %d)", username, ret)
                 del active[username]
 
@@ -66,7 +65,6 @@ def main() -> None:
         for account in accounts:
             username = extract_username(account)
             if username in active:
-                poll_process_output(active[username], username)
                 continue
 
             if is_live(account):

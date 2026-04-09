@@ -1,6 +1,7 @@
 import subprocess
 import logging
 import os
+import threading
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,15 @@ def build_output_template(username: str, output_dir: str) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{username}_{timestamp}.%(ext)s"
     return os.path.join(output_dir, filename)
+
+
+def _drain_output(process: subprocess.Popen, username: str) -> None:
+    """Background thread: continuously reads and logs yt-dlp output until the pipe closes."""
+    try:
+        for line in process.stdout:
+            logger.info("[yt-dlp:%s] %s", username, line.rstrip())
+    except Exception:
+        pass
 
 
 def start_download(username: str, output_dir: str, extra_args: list[str]) -> subprocess.Popen:
@@ -34,20 +44,12 @@ def start_download(username: str, output_dir: str, extra_args: list[str]) -> sub
         stderr=subprocess.STDOUT,
         text=True,
     )
+
+    threading.Thread(
+        target=_drain_output,
+        args=(process, username),
+        daemon=True,
+        name=f"drain-{username}",
+    ).start()
+
     return process
-
-
-def poll_process_output(process: subprocess.Popen, username: str) -> None:
-    """Read and log any pending output lines from the process (non-blocking)."""
-    if process.stdout is None:
-        return
-    try:
-        while True:
-            line = process.stdout.readline()
-            if not line:
-                break
-            logger.debug("[yt-dlp:%s] %s", username, line.rstrip())
-    except OSError:
-        pass  # pipe closed; process likely terminated
-    except Exception:
-        logger.warning("Unexpected error reading output for %s", username, exc_info=True)
