@@ -1,107 +1,276 @@
-# Plan: Dockerize auto-yt-dlp
+# Plan: Dockerize auto-yt-dlp with WebUI
 
-## Context
-The user wants to deploy this stream-recording app on Unraid and TrueNAS (both run Docker), while keeping the ability to run it locally with `python main.py`. The app is a long-running daemon that polls Chaturbate and spawns yt-dlp subprocesses — a good fit for a containerized deployment.
+## Overview
 
----
+Containerize the project and add a React/FastAPI WebUI, while keeping `python main.py` functional as a standalone headless daemon.
 
-## Changes Required
-
-### 1. Modify `main.py` (only Python file that needs changes)
-
-**Add `import os`** to the imports block (line 7 area, alongside other stdlib imports).
-
-**Replace line 18** (hardcoded log path):
-```python
-# Before:
-logging.FileHandler("auto-yt-dlp.log", encoding="utf-8"),
-
-# After:
-logging.FileHandler(
-    os.environ.get("LOG_PATH", Path(__file__).parent / "auto-yt-dlp.log"),
-    encoding="utf-8"
-),
-```
-
-**Replace line 23** (hardcoded config path):
-```python
-# Before:
-CONFIG_PATH = Path(__file__).parent / "config.json"
-
-# After:
-CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", Path(__file__).parent / "config.json"))
-```
-
-Both changes use `os.environ.get()` with a fallback — local runs continue to work unchanged. Docker sets the env vars to point into `/config`.
-
-**Hot-reload `config.json` on every poll cycle:**
-
-Move config loading inside the `while True` loop so changes take effect within one poll interval — no container restart needed. Wrap it in try/except so a mid-save or malformed file logs a warning and retains the previous config rather than crashing.
-
-```python
-# At top of main(), before the while loop — establish initial config:
-config = load_config()
-accounts = config["accounts"]
-poll_interval = config.get("poll_interval_seconds", 60)
-output_dir = config.get("output_dir", "downloads")
-extra_args = config.get("yt_dlp_args", [])
-
-# Inside while True, at the top of each cycle — reload:
-try:
-    config = load_config()
-    accounts = config["accounts"]
-    poll_interval = config.get("poll_interval_seconds", 60)
-    output_dir = config.get("output_dir", "downloads")
-    extra_args = config.get("yt_dlp_args", [])
-except Exception as e:
-    logger.warning("Failed to reload config.json, using previous values: %s", e)
-```
-
-Behavior on config changes:
-- **Add account** — picked up on next cycle, starts watching immediately
-- **Remove account** — any active download for that account runs to completion; no new download starts after it finishes
-- **Change `poll_interval_seconds`** — takes effect on the next `time.sleep()` call
-- **Change `yt_dlp_args` or `output_dir`** — takes effect on the next new download
-
-No new dependencies required. Works identically for local runs and Docker.
+**Decisions:**
+- Vite + React frontend, multi-stage Docker build (Node.js compiles JSX → static files served by FastAPI)
+- Daemon polling loop runs as an in-process background thread inside the FastAPI server
+- `python main.py` continues to work without the web server
+- Port: **8787**
 
 ---
 
-### 2. Create `Dockerfile`
+## Phase 1 — Shared State Module
 
+**Create `state.py`**
+
+Single source of truth shared between the daemon thread and FastAPI request handlers.
+
+```python
+import threading
+from datetime import datetime
+
+active: dict[str, dict] = {}   # username → session info (see shape below)
+active_lock = threading.Lock()
+
+daemon_running: bool = False
+daemon_start_time: datetime | None = None
+stop_event = threading.Event()
+
+config: dict = {}
+```
+
+Each `active[username]` entry shape:
+```python
+{
+  "user":      str,
+  "status":    "recording" | "finished" | "failed",
+  "started":   datetime,
+  "pid":       int,
+  "progress":  str,       # last yt-dlp stdout line
+  "log_path":  str,
+  "proc":      Popen,     # excluded when serialising to JSON
+}
+```
+
+---
+
+## Phase 2 — Refactor `main.py`
+
+Extract the polling loop into a `run_daemon(stop_event)` function so it can be called from both the CLI and the server.
+
+**Changes:**
+1. Add `import os`, `import state` at top
+2. `CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", "config.json"))`
+3. `LOG_PATH = Path(os.environ.get("LOG_PATH", "auto-yt-dlp.log"))`
+4. New `run_daemon(stop_event: threading.Event) -> None`:
+   - Uses `state.active` + `state.active_lock` instead of a local `active` dict
+   - Loop condition: `not stop_event.is_set()`
+   - Reloads config each iteration (live config changes without restart)
+   - Respects `config.get("max_concurrent", 0)` — skips new downloads when at limit (0 = unlimited)
+   - Calls `_in_quiet_hours(config)` — skips starting new downloads during configured quiet hours
+5. `main()` sets up logging + signal handlers, then calls `run_daemon(threading.Event())`
+6. `if __name__ == "__main__": main()` — CLI entry unchanged
+
+---
+
+## Phase 3 — Refactor `downloader.py`
+
+**Changes:**
+1. Import `state`
+2. `LOG_DIR = Path(os.environ.get("LOG_DIR", "logs"))`
+3. `start_download()` registers the session in `state.active[username]` (under `state.active_lock`)
+4. `_drain_output()` thread:
+   - Appends each line to `{LOG_DIR}/{username}.log`
+   - Updates `state.active[username]["progress"]` with the latest line
+5. On process exit, `_drain_output` sets `state.active[username]["status"]` to `"finished"` or `"failed"`
+
+---
+
+## Phase 4 — Extend `config.json` Schema
+
+All new fields are optional and backward-compatible — existing configs continue to work.
+
+```json
+{
+  "accounts": [
+    {"name": "butterflylips", "quality": "best", "poll_interval_seconds": null},
+    "heatherbby"
+  ],
+  "poll_interval_seconds": 60,
+  "output_dir": "downloads",
+  "yt_dlp_args": ["--no-part"],
+  "max_concurrent": 4,
+  "quiet_hours": {
+    "enabled": false,
+    "timezone": "America/Denver",
+    "schedule": {}
+  },
+  "disk_warn_gb": 100,
+  "disk_stop_gb": 20,
+  "retention": {
+    "enabled": false,
+    "days": 30,
+    "max_files_per_streamer": 10,
+    "max_total_gb": 500
+  }
+}
+```
+
+Also update `extract_username()` in `watcher.py` to accept dict-style accounts:
+```python
+if isinstance(account, dict):
+    return account["name"]
+```
+
+---
+
+## Phase 5 — Create `server.py` (FastAPI backend)
+
+New file. Starts the daemon thread on app startup, exposes REST + SSE endpoints, serves Vite static files.
+
+**Startup (lifespan):**
+```python
+@asynccontextmanager
+async def lifespan(app):
+    t = threading.Thread(target=run_daemon, args=(state.stop_event,), daemon=True)
+    t.start()
+    yield
+    state.stop_event.set()
+```
+
+Run with: `uvicorn server:app --host 0.0.0.0 --port 8787`
+
+**API endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/daemon` | `{running, uptime_s, account_count, poll_interval}` |
+| POST | `/api/daemon/start` | Clear stop_event, start daemon thread |
+| POST | `/api/daemon/stop` | Set stop_event |
+| GET | `/api/downloads` | Serialised `state.active` (proc key excluded) |
+| POST | `/api/downloads/{user}/stop` | `proc.terminate()` |
+| GET | `/api/accounts` | Accounts list from `state.config` |
+| POST | `/api/accounts` | Append account, save config.json |
+| DELETE | `/api/accounts/{name}` | Remove account, save config.json |
+| GET | `/api/library` | Scan output_dir → mp4 list with size/mtime |
+| GET | `/api/storage` | `shutil.disk_usage()` + per-user file breakdown |
+| GET | `/api/settings` | Full config dict |
+| POST | `/api/settings` | Validate + save config.json, update `state.config` |
+| GET | `/api/logs/{username}` | Last 200 lines of `{LOG_DIR}/{username}.log` |
+| GET | `/api/events` | SSE stream — 1 s tick with daemon + downloads summary |
+| GET | `/api/storage/cleanup/preview` | Preview files that would be deleted |
+| POST | `/api/storage/cleanup` | Execute retention cleanup |
+
+Static serving (catch-all, after all `/api` routes):
+```python
+app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="static")
+```
+
+**New `requirements.txt` entries:**
+```
+fastapi>=0.115
+uvicorn[standard]>=0.34
+aiofiles>=24.1
+psutil>=6.1
+```
+
+---
+
+## Phase 6 — React Frontend (`frontend/`)
+
+### Directory layout
+```
+frontend/
+├── package.json
+├── vite.config.js
+├── index.html
+└── src/
+    ├── main.jsx              # ReactDOM.createRoot → <App />
+    ├── App.jsx               # WebAppShell with tab routing + live data
+    ├── api.js                # fetch helpers for every /api/* endpoint
+    └── components/           # moved from project root components/
+        ├── Window.jsx
+        ├── ActiveDownloads.jsx
+        ├── Library.jsx
+        ├── AccountsSettings.jsx
+        ├── Storage.jsx
+        └── EmptyStates.jsx
+```
+
+### `frontend/package.json`
+```json
+{
+  "name": "auto-yt-dlp-ui",
+  "private": true,
+  "scripts": {
+    "dev":     "vite",
+    "build":   "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react":     "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "vite":                 "^6.3.0",
+    "@vitejs/plugin-react": "^4.4.0"
+  }
+}
+```
+
+### `frontend/vite.config.js`
+```js
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: { '/api': 'http://localhost:8787' }
+  }
+})
+```
+
+### `api.js` functions
+`fetchDownloads`, `fetchAccounts`, `fetchLibrary`, `fetchStorage`, `fetchSettings`, `saveSettings`, `addAccount`, `removeAccount`, `stopDownload`, `fetchLogs`, `openEventStream(onMessage)`.
+
+Replace static mock data in each component with `useEffect` + `useState` + the matching `api.js` call.
+
+### Files to relocate
+| From | To |
+|------|----|
+| `components/*.jsx` | `frontend/src/components/*.jsx` |
+| `browser-window.jsx` | `frontend/src/components/BrowserWindow.jsx` (design reference, not deployed) |
+| `design-canvas.jsx` | `frontend/src/components/DesignCanvas.jsx` (design reference, not deployed) |
+
+---
+
+## Phase 7 — Docker Artifacts
+
+### `Dockerfile`
 ```dockerfile
+# Stage 1: build frontend
+FROM node:22-alpine AS frontend
+WORKDIR /frontend
+COPY frontend/package*.json .
+RUN npm ci
+COPY frontend/ .
+RUN npm run build
+
+# Stage 2: Python runtime
 FROM python:3.12-slim
+WORKDIR /app
 
 # ffmpeg required by yt-dlp to mux streams into mp4
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-COPY main.py downloader.py watcher.py ./
+COPY *.py .
+COPY --from=frontend /frontend/dist ./frontend/dist
 
 VOLUME ["/config", "/downloads"]
+EXPOSE 8787
 
-ENV CONFIG_PATH=/config/config.json
-ENV LOG_PATH=/config/auto-yt-dlp.log
-
-CMD ["python", "main.py"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8787"]
 ```
 
-Notes:
-- `python:3.12-slim` — minimal Debian base, fully compatible with Python 3.10+ syntax used here
-- `ffmpeg` is required for `--merge-output-format mp4`; omitting it causes silent mux failures
-- `config.json` is NOT copied into the image — it is always mounted
-- `requirements.txt` is copied separately so pip layer is cached on rebuilds
-
----
-
-### 3. Create `docker-compose.yml`
-
+### `docker-compose.yml`
 ```yaml
 services:
   auto-yt-dlp:
@@ -109,93 +278,85 @@ services:
     image: auto-yt-dlp:latest
     container_name: auto-yt-dlp
     restart: unless-stopped
+    ports:
+      - "8787:8787"
     volumes:
       - ./config:/config
       - ./downloads:/downloads
     environment:
       - CONFIG_PATH=/config/config.json
       - LOG_PATH=/config/auto-yt-dlp.log
+      - LOG_DIR=/config/logs
+      - OUTPUT_DIR=/downloads
 ```
 
-Notes:
-- `restart: unless-stopped` — recovers from crashes, respects `docker stop`
-- Relative volume paths (`./config`, `./downloads`) for local Compose use; Unraid/TrueNAS users replace with absolute NAS paths
-- No port mappings — this app makes outbound requests only
-
----
-
-### 4. Create `.dockerignore`
-
+### `.dockerignore`
 ```
 __pycache__/
 *.pyc
 *.log
-downloads/
 .git/
-.gitignore
-config.json
-*.md
 .venv/
 .idea/
+downloads/
+config/
+frontend/node_modules/
+frontend/dist/
+*.md
+browser-window.jsx
+design-canvas.jsx
 ```
 
+### `config/` directory
+- Create `config/.gitkeep` (so the Docker Compose mount target exists)
+- Add `config/config.json` and `config/cookies.txt` to `.gitignore`
+- Keep a copy of `config.json` at `config/config.json` as the Docker-mode template (with `output_dir: /downloads` and `--cookies-from-file /config/cookies.txt`)
+
 ---
 
-### 5. Create `DOCKER.md`
+## Phase 8 — `DOCKER.md`
 
-Deployment guide covering:
+Cover:
+- Prerequisites (Docker, Docker Compose)
 - Cookie export (one-time, on host): `yt-dlp --cookies-from-browser firefox --cookies ./config/cookies.txt`
-- Example Docker `config.json` (with `output_dir: /downloads` and `--cookies-from-file /config/cookies.txt`)
-- Unraid paths: `/mnt/user/appdata/auto-yt-dlp/` → `/config`, `/mnt/user/data/recordings/auto-yt-dlp/` → `/downloads`
-- TrueNAS SCALE: dataset host paths mapped to `/config` and `/downloads` in the app config
+- Example `config/config.json` with `output_dir: /downloads` and `--cookies-from-file /config/cookies.txt`
 - Build & run: `docker compose up -d --build`
+- Accessing the WebUI at `http://localhost:8787`
+- Volume layout table (`./config` → `/config`, `./downloads` → `/downloads`)
+- Env vars table
+- NAS paths: Unraid (`/mnt/user/appdata/auto-yt-dlp/` → `/config`) and TrueNAS SCALE dataset paths
 
 ---
 
-### 6. Create `config/` directory structure
-
-- Add `config/` directory (gitignored) for local Docker Compose use
-- Add `config/.gitkeep` so the directory is tracked but empty
-- Update `.gitignore` to exclude `config/config.json` and `config/cookies.txt`
-
----
-
-### 7. Update `README.md`
-
-Add a "Docker" section pointing to `DOCKER.md` and showing the quick-start commands.
-
----
-
-## Cookie Migration (important user note)
-
-Current `config.json` uses `--cookies-from-browser firefox` which does NOT work in Docker. For Docker, the user must:
-1. Run once on host: `yt-dlp --cookies-from-browser firefox --cookies ./config/cookies.txt`
-2. Change `config.json` inside the `config/` dir to use `"--cookies-from-file", "/config/cookies.txt"` and `"output_dir": "/downloads"`
-
-The local `config.json` at the repo root is unchanged and continues to use `--cookies-from-browser firefox`.
-
----
-
-## Critical Files
+## File Change Summary
 
 | File | Action |
 |------|--------|
-| `main.py` | Modify — add `import os`, update lines 18 and 23, move config loading inside poll loop |
-| `Dockerfile` | Create new |
-| `docker-compose.yml` | Create new |
-| `.dockerignore` | Create new |
-| `DOCKER.md` | Create new |
-| `config/.gitkeep` | Create new |
-| `.gitignore` | Modify — add `config/config.json`, `config/cookies.txt` |
-| `README.md` | Modify — add Docker section |
+| `state.py` | CREATE |
+| `server.py` | CREATE |
+| `main.py` | MODIFY — extract `run_daemon()`, env-var paths, use `state` |
+| `downloader.py` | MODIFY — update `state.active`, per-user log files |
+| `watcher.py` | MODIFY — handle dict-style accounts |
+| `config.json` | MODIFY — add optional new fields |
+| `requirements.txt` | MODIFY — add fastapi, uvicorn, aiofiles, psutil |
+| `frontend/` | CREATE — entire Vite + React project |
+| `Dockerfile` | CREATE |
+| `docker-compose.yml` | CREATE |
+| `.dockerignore` | CREATE |
+| `DOCKER.md` | CREATE |
+| `config/.gitkeep` | CREATE |
+| `.gitignore` | MODIFY — add config/config.json, config/cookies.txt |
 
 ---
 
-## Verification
+## Verification Checklist
 
-1. **Local run still works**: `python main.py` with `config.json` in project root — no behavior change
-2. **Build succeeds**: `docker compose build` completes without errors
-3. **Container starts**: `docker compose up` shows the "Watching N account(s)" log line
-4. **Hot-reload works**: Edit `config/config.json` while the container is running — the next poll cycle picks up changes without restart
-5. **Downloads persist**: Files appear in `./downloads/` (or NAS path) after a stream is recorded
-6. **Log persists**: `config/auto-yt-dlp.log` is written and survives container restarts
+- [ ] `python main.py` — polls accounts without starting a web server
+- [ ] `uvicorn server:app --port 8787` — daemon starts as background thread; `GET /api/daemon` returns `{running: true, ...}`
+- [ ] `cd frontend && npm run dev` — UI loads at `localhost:5173`, `/api` proxied to `localhost:8787`
+- [ ] `docker compose build` — both build stages complete without errors
+- [ ] `docker compose up -d` — UI accessible at `localhost:8787`, all four tabs functional
+- [ ] `curl localhost:8787/api/downloads` — returns JSON array
+- [ ] `curl -N localhost:8787/api/events` — streams SSE events every second
+- [ ] Edit `config/config.json` while container runs — next poll cycle picks up changes without restart
+- [ ] Recordings appear in `./downloads/` after a stream is captured
