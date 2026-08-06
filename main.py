@@ -42,6 +42,13 @@ def load_config() -> dict:
         ) from exc
     except json.JSONDecodeError as exc:
         raise ConfigError(f"{CONFIG_PATH} is not valid JSON: {exc}") from exc
+    # FileNotFoundError is itself an OSError, so it must stay above this one.
+    # Covers permission denied, a directory in place of the file, and any other
+    # read failure the ConfigError contract promises to report cleanly.
+    except OSError as exc:
+        raise ConfigError(f"Could not read {CONFIG_PATH}: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"{CONFIG_PATH} is not valid UTF-8: {exc}") from exc
 
 
 def main() -> None:
@@ -51,9 +58,24 @@ def main() -> None:
         logger.error("%s", exc)
         sys.exit(1)
 
+    # A valid JSON document need not be an object: "[1, 2]" parses fine and
+    # would make the .get() calls below raise AttributeError.
+    if not isinstance(config, dict):
+        logger.error(
+            "%s must contain a JSON object at the top level, found %s.",
+            CONFIG_PATH,
+            type(config).__name__,
+        )
+        sys.exit(1)
+
     # Every other key uses .get() with a default; accounts did not, so a config
     # without it raised a bare KeyError.
-    accounts: list[str] = config.get("accounts", [])
+    accounts = config.get("accounts", [])
+    if not isinstance(accounts, list):
+        logger.error(
+            "'accounts' in %s must be a list, found %s.", CONFIG_PATH, type(accounts).__name__
+        )
+        sys.exit(1)
     if not accounts:
         logger.error("No accounts configured in %s — nothing to watch.", CONFIG_PATH)
         sys.exit(1)

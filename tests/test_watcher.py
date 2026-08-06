@@ -48,6 +48,35 @@ class TestExtractUsername:
         with pytest.raises(ValueError, match="chaturbate.com"):
             extract_username("https://chaturbate.com/")
 
+    @pytest.mark.parametrize(
+        "account",
+        [
+            "https://example.test/alice",
+            "https://chaturbate.com.evil.test/alice",
+            "https://notchaturbate.com/alice",
+            "http://localhost:8080/alice",
+        ],
+    )
+    def test_rejects_urls_for_other_hosts(self, account):
+        # Status is always queried against chaturbate.com. Accepting another
+        # host would silently monitor the Chaturbate account of the same name.
+        with pytest.raises(ValueError, match="must point at chaturbate.com"):
+            extract_username(account)
+
+    @pytest.mark.parametrize(
+        "account",
+        ["https://www.chaturbate.com/alice/", "HTTPS://WWW.CHATURBATE.COM/alice/"],
+    )
+    def test_accepts_the_www_host(self, account):
+        assert extract_username(account) == "alice"
+
+    @pytest.mark.parametrize("account", [None, 42, ["alice"], {"name": "alice"}])
+    def test_rejects_non_string_entries(self, account):
+        # A JSON null or number in the accounts list previously raised a bare
+        # AttributeError from .strip().
+        with pytest.raises(ValueError, match="must be strings"):
+            extract_username(account)
+
 
 class _FakeResponse:
     def __init__(self, payload=None, exc=None):

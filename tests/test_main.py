@@ -36,6 +36,36 @@ class TestLoadConfig:
         with pytest.raises(ConfigError, match="not valid JSON"):
             load_config()
 
+    def test_unreadable_file_raises_actionable_error(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config.json"
+        cfg.write_text("{}", encoding="utf-8")
+        cfg.chmod(0o000)
+        monkeypatch.setattr(main, "CONFIG_PATH", cfg)
+
+        try:
+            # PermissionError is an OSError, not FileNotFoundError — previously
+            # it escaped the ConfigError contract as a raw traceback.
+            with pytest.raises(ConfigError, match="Could not read"):
+                load_config()
+        finally:
+            cfg.chmod(0o644)
+
+    def test_directory_in_place_of_file_raises_actionable_error(self, tmp_path, monkeypatch):
+        target = tmp_path / "config.json"
+        target.mkdir()
+        monkeypatch.setattr(main, "CONFIG_PATH", target)
+
+        with pytest.raises(ConfigError, match="Could not read"):
+            load_config()
+
+    def test_invalid_utf8_raises_actionable_error(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "config.json"
+        cfg.write_bytes(b'{"accounts": ["\xff\xfe invalid utf-8"]}')
+        monkeypatch.setattr(main, "CONFIG_PATH", cfg)
+
+        with pytest.raises(ConfigError, match="not valid UTF-8"):
+            load_config()
+
     def test_reads_utf8_content(self, tmp_path, monkeypatch):
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({"accounts": ["ünicøde"]}), encoding="utf-8")
@@ -92,6 +122,47 @@ class TestMainStartupGuards:
             main.main()
 
         assert exc.value.code == 1
+
+    def test_non_object_root_exits_instead_of_attributeerror(self, tmp_path, monkeypatch, caplog):
+        # "[1, 2]" is valid JSON, but config.get() would raise AttributeError.
+        self._write_config(tmp_path, monkeypatch, json.dumps([1, 2]))
+
+        with caplog.at_level("ERROR"), pytest.raises(SystemExit) as exc:
+            main.main()
+
+        assert exc.value.code == 1
+        assert "JSON object at the top level" in caplog.text
+
+    def test_non_list_accounts_exits(self, tmp_path, monkeypatch, caplog):
+        self._write_config(tmp_path, monkeypatch, json.dumps({"accounts": "alice"}))
+
+        with caplog.at_level("ERROR"), pytest.raises(SystemExit) as exc:
+            main.main()
+
+        assert exc.value.code == 1
+        assert "must be a list" in caplog.text
+
+    def test_null_account_entry_exits_instead_of_attributeerror(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        self._write_config(tmp_path, monkeypatch, json.dumps({"accounts": [None]}))
+
+        with caplog.at_level("ERROR"), pytest.raises(SystemExit) as exc:
+            main.main()
+
+        assert exc.value.code == 1
+        assert "must be strings" in caplog.text
+
+    def test_non_chaturbate_url_exits(self, tmp_path, monkeypatch, caplog):
+        self._write_config(
+            tmp_path, monkeypatch, json.dumps({"accounts": ["https://example.test/alice"]})
+        )
+
+        with caplog.at_level("ERROR"), pytest.raises(SystemExit) as exc:
+            main.main()
+
+        assert exc.value.code == 1
+        assert "must point at chaturbate.com" in caplog.text
 
     def test_unresolvable_account_exits_before_polling(self, tmp_path, monkeypatch, caplog):
         self._write_config(

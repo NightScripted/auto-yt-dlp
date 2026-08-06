@@ -39,6 +39,10 @@ to add the accounts you want:
 
 Accounts can be specified as either a bare username (`"someusername"`) or a full Chaturbate URL (`"https://chaturbate.com/someusername/"`).
 
+URLs must point at `chaturbate.com` or `www.chaturbate.com`. Status is always
+checked against the Chaturbate API, so a URL for any other host is rejected at
+startup rather than silently monitoring the Chaturbate account of the same name.
+
 ## Usage
 
 ```bash
