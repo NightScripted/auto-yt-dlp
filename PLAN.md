@@ -86,8 +86,8 @@ All new fields are optional and backward-compatible — existing configs continu
 ```json
 {
   "accounts": [
-    {"name": "butterflylips", "quality": "best", "poll_interval_seconds": null},
-    "heatherbby"
+    {"name": "example_username", "quality": "best", "poll_interval_seconds": null},
+    "another_example_username"
   ],
   "poll_interval_seconds": 60,
   "output_dir": "downloads",
