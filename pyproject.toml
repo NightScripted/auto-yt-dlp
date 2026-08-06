@@ -1,0 +1,27 @@
+[project]
+name = "auto-yt-dlp"
+version = "0.1.0"
+description = "Watches Chaturbate accounts and records with yt-dlp when they go live"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.34.2",
+    "yt-dlp>=2026.7.4",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Modules live at the repo root; make them importable regardless of whether
+# pytest is invoked as `pytest` or `python -m pytest`.
+pythonpath = ["."]

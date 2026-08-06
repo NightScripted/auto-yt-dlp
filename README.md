@@ -4,7 +4,7 @@ Watches Chaturbate accounts and automatically starts recording with `yt-dlp` whe
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.12+
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) installed and available on your PATH
 
 ```bash
@@ -13,7 +13,14 @@ pip install -r requirements.txt
 
 ## Setup
 
-Edit `config.json` to add the accounts you want to watch:
+Copy the example config, then edit your local copy:
+
+```bash
+cp config.example.json config.json
+```
+
+`config.json` is gitignored so the accounts you watch stay off the repo. Edit it
+to add the accounts you want:
 
 ```json
 {

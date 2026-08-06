@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # yt-dlp ships site-compatibility fixes constantly; a stale floor here means
+  # the recorder silently stops working. Check weekly.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -22,7 +22,7 @@ Single source of truth shared between the daemon thread and FastAPI request hand
 import threading
 from datetime import datetime
 
-active: dict[str, dict] = {}   # username → session info (see shape below)
+active: dict[str, dict] = {}  # username → session info (see shape below)
 active_lock = threading.Lock()
 
 daemon_running: bool = False
@@ -35,13 +35,13 @@ config: dict = {}
 Each `active[username]` entry shape:
 ```python
 {
-  "user":      str,
-  "status":    "recording" | "finished" | "failed",
-  "started":   datetime,
-  "pid":       int,
-  "progress":  str,       # last yt-dlp stdout line
-  "log_path":  str,
-  "proc":      Popen,     # excluded when serialising to JSON
+    "user": str,
+    "status": "recording" | "finished" | "failed",
+    "started": datetime,
+    "pid": int,
+    "progress": str,  # last yt-dlp stdout line
+    "log_path": str,
+    "proc": Popen,  # excluded when serialising to JSON
 }
 ```
 
