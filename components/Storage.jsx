@@ -9,7 +9,7 @@ function StorageTab() {
   const usedPct = usedGB / totalGB;
 
   const streamers = [
-    { name: 'butterflylips', files: 38, size: 89.4,  color: 'hsl(210, 55%, 55%)', retention: '30 days' },
+    { name: 'example_username', files: 38, size: 89.4,  color: 'hsl(210, 55%, 55%)', retention: '30 days' },
     { name: 'velvetsky',     files: 24, size: 64.1,  color: 'hsl(340, 55%, 55%)', retention: '14 days' },
     { name: 'moonbeam_22',   files: 19, size: 41.8,  color: 'hsl(280, 55%, 60%)', retention: '30 days' },
     { name: 'indigo_rose',   files: 12, size: 18.2,  color: 'hsl(250, 50%, 60%)', retention: 'keep all' },

@@ -49,9 +49,9 @@ Single source of truth for the daemon and API server running in the same process
 # Key structure
 _state = {
     "daemon": {"running": False, "start_time": None},
-    "downloads": {},   # username → session dict
-    "logs": {},        # username → collections.deque(maxlen=500)
-    "config": {},      # live copy of current config
+    "downloads": {},  # username → session dict
+    "logs": {},  # username → collections.deque(maxlen=500)
+    "config": {},  # live copy of current config
 }
 ```
 
@@ -60,9 +60,9 @@ Session dict shape:
 {
     "user": str,
     "status": "recording" | "finished" | "failed",
-    "started": float,   # time.time()
+    "started": float,  # time.time()
     "pid": int | None,
-    "progress": str,    # last yt-dlp output line
+    "progress": str,  # last yt-dlp output line
     "log_path": str,
 }
 ```

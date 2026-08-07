@@ -1,6 +1,6 @@
-import subprocess
 import logging
 import os
+import subprocess
 import threading
 from datetime import datetime
 
@@ -32,7 +32,8 @@ def start_download(username: str, output_dir: str, extra_args: list[str]) -> sub
     cmd = [
         "yt-dlp",
         url,
-        "-o", output_template,
+        "-o",
+        output_template,
         *extra_args,
     ]
 

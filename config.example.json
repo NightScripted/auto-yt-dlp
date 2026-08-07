@@ -1,15 +1,12 @@
 {
   "accounts": [
-    "https://chaturbate.com/ivey_strigoi/",
-    "heatherbby",
-    "keix_moon",
-    "islandladies"
+    "example_username",
+    "https://chaturbate.com/another_example_username/"
   ],
   "poll_interval_seconds": 60,
   "output_dir": "downloads",
   "yt_dlp_args": [
     "--no-part",
-    "--cookies-from-browser", "firefox",
     "--merge-output-format", "mp4"
   ]
 }

@@ -3,3 +3,11 @@ __pycache__/
 *.pyc
 downloads/
 auto-yt-dlp.log
+
+# Local config holds the accounts you watch — keep it out of the repo.
+# Start from config.example.json instead.
+config.json
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage

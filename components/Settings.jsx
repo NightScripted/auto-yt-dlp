@@ -4,7 +4,7 @@
 function SettingsTab({ showAccountDrawer = false, openSection = 'main' }) {
   const T = window.TOKENS;
   const accounts = [
-    { name: 'butterflylips',                 quality: '1080p60', format: 'mp4', status: 'watching' },
+    { name: 'example_username',                 quality: '1080p60', format: 'mp4', status: 'watching' },
     { name: 'moonbeam_22',                   quality: '720p',    format: 'mp4', status: 'watching', selected: true, url: 'https://example.stream/moonbeam_22' },
     { name: 'velvetsky',                     quality: 'best',    format: 'mp4', status: 'paused' },
   ];

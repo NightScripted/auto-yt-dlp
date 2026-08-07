@@ -4,7 +4,7 @@
 function ActiveDownloadsTab({ sortBy = 'started', sortDir = 'desc', expandedRow = null }) {
   const T = window.TOKENS;
   const rows = [
-    { user: 'butterflylips', status: 'recording', started: '2026-04-21 14:32:01', pid: 48213,
+    { user: 'example_username', status: 'recording', started: '2026-04-21 14:32:01', pid: 48213,
       progress: '[download]  412.8MiB at 1.82MiB/s (00:03:49)  frag 229/∞' },
     { user: 'moonbeam_22',   status: 'recording', started: '2026-04-21 14:28:44', pid: 48197,
       progress: '[hls @ 0x7f2a] Opening segment 847.ts for reading · 1080p60' },

@@ -23,14 +23,63 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH = Path(__file__).parent / "config.json"
 
 
+class ConfigError(Exception):
+    """Raised when config.json is missing, unreadable, or malformed."""
+
+
 def load_config() -> dict:
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
+    """Load config.json.
+
+    Raises:
+        ConfigError: with an actionable message instead of a raw traceback.
+    """
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError as exc:
+        raise ConfigError(
+            f"No config file at {CONFIG_PATH}. Copy config.example.json to config.json and edit it."
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"{CONFIG_PATH} is not valid JSON: {exc}") from exc
+    # FileNotFoundError is itself an OSError, so it must stay above this one.
+    # Covers permission denied, a directory in place of the file, and any other
+    # read failure the ConfigError contract promises to report cleanly.
+    except OSError as exc:
+        raise ConfigError(f"Could not read {CONFIG_PATH}: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"{CONFIG_PATH} is not valid UTF-8: {exc}") from exc
 
 
 def main() -> None:
-    config = load_config()
-    accounts: list[str] = config["accounts"]
+    try:
+        config = load_config()
+    except ConfigError as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
+
+    # A valid JSON document need not be an object: "[1, 2]" parses fine and
+    # would make the .get() calls below raise AttributeError.
+    if not isinstance(config, dict):
+        logger.error(
+            "%s must contain a JSON object at the top level, found %s.",
+            CONFIG_PATH,
+            type(config).__name__,
+        )
+        sys.exit(1)
+
+    # Every other key uses .get() with a default; accounts did not, so a config
+    # without it raised a bare KeyError.
+    accounts = config.get("accounts", [])
+    if not isinstance(accounts, list):
+        logger.error(
+            "'accounts' in %s must be a list, found %s.", CONFIG_PATH, type(accounts).__name__
+        )
+        sys.exit(1)
+    if not accounts:
+        logger.error("No accounts configured in %s — nothing to watch.", CONFIG_PATH)
+        sys.exit(1)
+
     poll_interval: int = config.get("poll_interval_seconds", 60)
     output_dir: str = config.get("output_dir", "downloads")
     extra_args: list[str] = config.get("yt_dlp_args", [])
@@ -48,11 +97,21 @@ def main() -> None:
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    usernames = [extract_username(a) for a in accounts]
+    # Resolve every account up front so a malformed entry is reported here,
+    # with the offending value, rather than partway through a poll cycle.
+    try:
+        usernames = [extract_username(a) for a in accounts]
+    except ValueError as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
+
     logger.info("Watching %d account(s): %s", len(usernames), ", ".join(usernames))
     logger.info("Poll interval: %ds | Output dir: %s", poll_interval, output_dir)
 
-    while True:
+    # Not covered by tests: an unbounded poll loop with no exit condition cannot
+    # be driven from pytest without restructuring it. The logic it calls —
+    # extract_username, is_live, start_download — is covered directly.
+    while True:  # pragma: no cover
         # Reap finished downloads
         for username in list(active.keys()):
             proc = active[username]

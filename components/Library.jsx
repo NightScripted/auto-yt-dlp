@@ -4,10 +4,10 @@
 function LibraryTab({ view = 'list', search = '', activeFilters = [], bulkCount = 0 }) {
   const T = window.TOKENS;
   const files = [
-    { name: 'butterflylips_2026-04-21_14-32-01.mp4', size: '1.24 GB', mod: '2026-04-21 14:55:03', dur: '00:28:14', checked: bulkCount > 0, hue: 210 },
+    { name: 'example_username_2026-04-21_14-32-01.mp4', size: '1.24 GB', mod: '2026-04-21 14:55:03', dur: '00:28:14', checked: bulkCount > 0, hue: 210 },
     { name: 'moonbeam_22_2026-04-21_13-04-22.mp4',   size: '876 MB',  mod: '2026-04-21 13:52:10', dur: '00:19:42', checked: bulkCount > 1, hue: 280 },
     { name: 'velvetsky_2026-04-21_10-18-44.mp4',     size: '2.41 GB', mod: '2026-04-21 11:00:06', dur: '00:41:22', checked: bulkCount > 2, hue: 340 },
-    { name: 'butterflylips_2026-04-20_22-11-07.mp4', size: '3.02 GB', mod: '2026-04-20 23:47:31', dur: '01:12:06', checked: bulkCount > 3, hue: 180 },
+    { name: 'example_username_2026-04-20_22-11-07.mp4', size: '3.02 GB', mod: '2026-04-20 23:47:31', dur: '01:12:06', checked: bulkCount > 3, hue: 180 },
     { name: 'moonbeam_22_2026-04-20_19-55-12.mp4',   size: '1.88 GB', mod: '2026-04-20 20:44:09', dur: '00:48:51', checked: bulkCount > 4, hue: 30  },
     { name: 'indigo_rose_2026-04-19_21-02-50.mp4',   size: '612 MB',  mod: '2026-04-19 21:32:15', dur: '00:14:05', checked: bulkCount > 5, hue: 250 },
   ];

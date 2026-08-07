@@ -11,6 +11,9 @@
 - `downloader.py` — builds and spawns `yt-dlp` subprocesses; handles output logging
 - `config.json` — user configuration (accounts, poll interval, output dir, yt-dlp args)
 - `requirements.txt` — `requests`, `yt-dlp`
+- `requirements-dev.txt` — test/lint toolchain (`pytest`, `pytest-cov`, `ruff`)
+- `pyproject.toml` — Python floor, ruff and pytest configuration
+- `tests/` — pytest suite covering the watcher, downloader, and config loading
 
 ## Key behaviours
 
@@ -22,4 +25,5 @@
 
 ## Python version
 
-Requires Python 3.10+ (uses `str | None` union syntax).
+Requires Python 3.12+, declared in `pyproject.toml` (`requires-python`) and
+enforced by the CI matrix (3.12 / 3.13 / 3.14).
